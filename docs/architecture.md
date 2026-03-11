@@ -1,74 +1,40 @@
-# Архитектура ScriptBot (боевая версия + масштабирование)
+# Архитектура ScriptBot (боевой baseline)
 
-## 1. Контуры системы
+## Модули
 
-1. **Bot Gateway (aiogram 3)**
-   - Сценарии `/start`, `/search`, выбор источника, экспорт, подписки.
-2. **FastAPI Backend**
-   - API для админки, статусы задач, лимиты, аудит, конфиг источников.
-3. **Search Aggregator**
-   - Параллельный вызов всех адаптеров, нормализация, дедупликация, ранжирование.
-4. **Source Adapters (x5)**
-   - Унифицированный контракт: `search/get_manga/get_chapters/get_pages`.
-5. **Export Service**
-   - Генерация PDF/CBZ/EPUB, проверка целостности страниц и метаданных.
-6. **Subscriptions Service**
-   - Периодический polling новых глав + уведомления в Telegram.
-7. **Queue Layer (Celery + Redis)**
-   - Асинхронные задачи парсинга/экспорта/уведомлений.
-8. **PostgreSQL + Redis**
-   - Данные домена + кэш/брокер.
+- `app/adapters/base.py` — единый контракт парсеров.
+- `app/adapters/http_adapter.py` — общий HTTP/HTML-движок парсинга.
+- `app/adapters/sources/*.py` — подключаемые парсеры сайтов.
+- `app/adapters/registry.py` — регистрация адаптеров и управление через `ENABLED_SOURCES`.
+- `app/services/aggregator.py` — fan-out поиска и агрегация результатов.
+- `app/services/search.py` — нормализация, translit и fuzzy score.
+- `app/api/routes.py` — API для источников, поиска, карточек и глав.
 
-## 2. Принципы поиска
+## Поддерживаемые источники на текущем этапе
 
-- Нормализация: регистр, `ё→е`, спецсимволы, лишние пробелы.
-- Поиск по полям: `title_ru`, `title_en`, `title_original`, `aliases`, `slug`.
-- Fuzzy score для опечаток.
-- Дедупликация по fingerprint (название + aliases + идентификаторы).
-- Ранжирование: exact match > fuzzy > количество глав > приоритет источника.
+1. mangalib
+2. mangabuff
+3. remanga
+4. senkuro
+5. dezu
+6. mangachan
 
-## 3. Выбор источника
+## Логика выбора источника
 
-- В карточке всегда отображаются все доступные источники и число глав.
-- Источник по умолчанию — максимальное число глав.
-- Пользователь может вручную переопределить источник (хранится в профиле/сессии).
+- В aggregated result сохраняются все кандидаты.
+- `best_source` выбирается по максимальному `chapter_count`.
+- При равенстве первее идет источник с более высоким fuzzy score в выдаче.
 
-## 4. Экспорт
+## Масштабирование
 
-- Форматы: PDF, CBZ, EPUB.
-- Сценарии: одиночная глава и диапазон.
-- Именование:
-  - `MangaName - Ch_001.pdf`
-  - `MangaName - Ch_001-010.cbz`
-- Метаданные: `title`, `chapter_range`, `source`, `created_at`, `language`.
+- API stateless, горизонтальное масштабирование через несколько инстансов.
+- Очереди Celery для тяжелых задач экспорта/обхода anti-bot.
+- Redis для кэширования выдачи поиска.
 
-## 5. Cloudflare/anti-bot
+## Что дальше до fully production
 
-- Режим `http_only`: httpx + ротация UA + rate limit.
-- Режим `browser_fallback`: Playwright при challenge.
-- Централизованный cookie/session pool с TTL по доменам.
-- Переключение режима задаётся в админке для каждого источника.
-
-## 6. Минимальная схема БД
-
-- `users` (роль, tg_id, квоты)
-- `sources` (приоритет, режим, health)
-- `manga`, `manga_aliases`, `source_manga`
-- `chapters`
-- `subscriptions`
-- `download_jobs`, `download_files`
-- `audit_log`
-
-## 7. Масштабирование на 1000+ пользователей
-
-- Асинхронный fan-out поиска по источникам.
-- Redis-кэш популярных запросов на 5–30 минут.
-- 2–4 Celery worker процесса на старте, горизонтальное масштабирование.
-- Отдельные очереди: `search`, `export`, `notify`.
-- Мониторинг: latency/error rate по каждому адаптеру.
-
-## 8. Дорожная карта
-
-1. **MVP (2–3 недели)**: бот, 2 адаптера, поиск, карточка, PDF/CBZ, базовая админка.
-2. **Этап 2 (1–2 недели)**: +3 адаптера, EPUB, подписки, health-check.
-3. **Этап 3 (1 неделя)**: усиленный CF fallback, tuning релевантности, оптимизация VPS.
+- Реальные API/селекторы под каждый сайт и regression-тесты парсеров.
+- Экспорт PDF/CBZ/EPUB как задачи Celery.
+- Схема PostgreSQL + Alembic миграции.
+- Подписки на новые главы и webhook/polling-уведомления.
+- Anti-bot fallback (Playwright session pool per-domain).

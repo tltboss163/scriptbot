@@ -1,62 +1,47 @@
-# ScriptBot — Telegram-бот и админка для агрегации манги
+# ScriptBot — боевая версия каркаса агрегатора манги
 
-Проект реализует бэкенд, Telegram-бота и админ-панель для поиска и скачивания манги с нескольких источников с единым интерфейсом.
+ScriptBot — backend + Telegram-бот для поиска и агрегации манги по подключаемым модулям источников.
 
-## Цели MVP
+## Что уже реализовано
 
-- Единый поиск по 5 источникам через адаптеры.
-- Карточка тайтла с полными метаданными и количеством глав по источникам.
-- Скачивание одной главы и диапазона в PDF/CBZ/EPUB.
-- Подписки на новые главы.
-- Управление ролями, лимитами и режимом anti-bot в админке.
+- FastAPI API с endpoints:
+  - `GET /health/live`
+  - `GET /health/ready`
+  - `GET /api/sources`
+  - `GET /api/search?q=<query>`
+  - `GET /api/manga/{source}/{source_id}`
+  - `GET /api/manga/{source}/{source_id}/chapters`
+- Подключаемые модули-парсеры источников:
+  - `mangalib`
+  - `mangabuff`
+  - `remanga`
+  - `senkuro`
+  - `dezu`
+  - `mangachan`
+- Единый агрегатор поиска с дедупликацией по fingerprint и ранжированием.
+- Телеграм-бот (aiogram 3) с базовыми командами `/start` и `/sources`.
+- Docker Compose: API, Celery worker/beat, PostgreSQL, Redis.
 
-## Технологический стек
+## Принцип подключаемости парсеров
 
-- Python 3.12
-- FastAPI + Uvicorn
-- aiogram 3
-- PostgreSQL 15
-- Redis
-- Celery
-- Playwright (fallback для JS/CF challenge)
-- Docker Compose
+Каждый источник — отдельный модуль в `app/adapters/sources/*.py`, реализующий интерфейс `SourceAdapter`.
+Регистрация и включение/отключение делается через `app/adapters/registry.py` и переменную `ENABLED_SOURCES`.
 
-## Структура репозитория
+## Быстрый запуск
 
-- `app/main.py` — API и health endpoints.
-- `app/config.py` — конфигурация и переменные окружения.
-- `app/bot/main.py` — точка входа Telegram-бота.
-- `app/adapters/base.py` — контракт адаптера источника.
-- `app/services/search.py` — нормализация строк и базовый fuzzy matching.
-- `docs/architecture.md` — архитектура и roadmap реализации.
-- `docker-compose.yml` — локальный запуск API/БД/Redis/воркеров.
+```bash
+cp .env.example .env
+docker compose up --build
+```
 
-## Быстрый старт (локально)
+Проверка:
 
-1. Скопируйте переменные окружения:
-   ```bash
-   cp .env.example .env
-   ```
-2. Запустите сервисы:
-   ```bash
-   docker compose up --build
-   ```
-3. Проверьте API:
-   - `GET http://localhost:8000/health/live`
-   - `GET http://localhost:8000/health/ready`
+```bash
+curl 'http://localhost:8000/api/sources'
+curl 'http://localhost:8000/api/search?q=naruto'
+```
 
-## Следующие шаги реализации
+## Важно
 
-1. Подключить 2 реальных source-адаптера (MVP).
-2. Реализовать таблицы БД и миграции.
-3. Добавить очередь экспорта и пайплайн PDF/CBZ/EPUB.
-4. Реализовать aiogram-сценарии `/search`, карточку, выбор источника, скачивание.
-5. Добавить админку лимитов/ролей и мониторинг адаптеров.
-
-## Что требуется от заказчика для production-ready запуска
-
-1. Список 5 приоритетных доменов.
-2. Доступы/whitelist (если есть авторизация или anti-bot исключения).
-3. Политика хранения экспортных файлов.
-4. Брендинг бота (название/аватар/тексты).
-5. Параметры VPS (CPU/RAM/диск).
+Селекторы сайтов могут меняться, поэтому каждый модуль парсера изолирован и может обновляться независимо.
+Для сайтов с anti-bot/Cloudflare предусмотрена стратегия fallback (следующий этап — браузерный контекст Playwright в адаптерах).

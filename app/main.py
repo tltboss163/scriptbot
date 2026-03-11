@@ -2,7 +2,10 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI
 
-app = FastAPI(title="ScriptBot API", version="0.1.0")
+from app.api.routes import router as api_router
+
+app = FastAPI(title="ScriptBot API", version="0.2.0")
+app.include_router(api_router)
 
 
 @app.get("/health/live")
